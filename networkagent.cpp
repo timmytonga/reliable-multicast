@@ -23,71 +23,7 @@ namespace udp_client_server
     }
 
 
-    UDP_Client::UDP_Client(const char * hostname, int port)
-            : f_port(port)
-            , f_addr(hostname)
-    {
-        struct addrinfo hints{}, *hostai;  // ai stands for addrinfo
-        int rv;
-        char decimal_port[16];
-        snprintf(decimal_port, sizeof(decimal_port), "%d", f_port);
-        decimal_port[sizeof(decimal_port) / sizeof(decimal_port[0]) - 1] = '\0';
-
-        // getaddrinfo to check for host
-        memset(&hints, 0, sizeof hints);
-        hints.ai_family = AF_INET;
-        hints.ai_socktype = SOCK_DGRAM;
-        // we get the host addrinfo
-        while ((rv = getaddrinfo(hostname, decimal_port, &hints, &hostai)) != 0) {
-            DPRINTF(("Failed to getaddrinfo for %s (%s). Trying again after %d seconds...\n",
-                    hostname, gai_strerror(rv), THREAD_SLEEP_TIME))
-            sleep(THREAD_SLEEP_TIME);  // try again until we find
-        }
-        f_addrinfo = hostai;
-
-        // Creating socket file descriptor
-        if ( (sockfd = socket(hostai->ai_family, hostai->ai_socktype, hostai->ai_protocol)) < 0  ) {
-            perror("socket creation failed");
-            exit(EXIT_FAILURE);
-        }
-
-    }
-
-    UDP_Client::~UDP_Client()
-    {
-        freeaddrinfo(f_addrinfo);
-        close(sockfd);
-    }
-
-    int UDP_Client::get_socket() const
-    {
-        return sockfd;
-    }
-
-    int UDP_Client::get_port() const
-    {
-        return f_port;
-    }
-
-    const char * UDP_Client::get_addr() const
-    {
-        return f_addr;
-    }
-
-/**
- * This function sends \p msg through the UDP client socket. The function
- * cannot be used to change the destination as it was defined when creating
- * the UDP_Client object.
- *
- * \return -1 if an error occurs, otherwise the number of bytes sent. errno
- * is set accordingly on error.
- */
-    int UDP_Client::send(const char *msg, size_t size)
-    {
-        return sendto(sockfd, msg, size, 0, f_addrinfo->ai_addr, f_addrinfo->ai_addrlen);
-    }
-
-// ========================= SEVER =========================
+    // ========================= SEVER =========================
     UDP_Server::UDP_Server(int port)
             : f_port(port), their_addr()
     {
@@ -154,15 +90,19 @@ namespace udp_client_server
  * \return The number of bytes read or -1 if an error occurs.
  */
     int UDP_Server::recv(char *msg, size_t max_size)
+    /* return numbytes received. remember to set position at numbytes to '\0' for string*/
     {
         char s[INET6_ADDRSTRLEN];
         socklen_t addr_len;
         struct sockaddr_storage rep_addr{};
         int numbytes;
         numbytes = recvfrom(sockfd, msg, max_size-1 , 0, (struct sockaddr *)&rep_addr, &addr_len);
-        const char * their_ip = inet_ntop(rep_addr.ss_family, get_in_addr((struct sockaddr *)&rep_addr), s, sizeof s);
-        printf("DEBUG [UDP_Server::recv] received msg %s from %s.\n", msg, their_ip);
+        if (numbytes == -1){perror("recvfrom error.... ."); exit(1);}
+//        const char * their_ip = inet_ntop(rep_addr.ss_family, get_in_addr((struct sockaddr *)&rep_addr), s, sizeof s);
+//        printf("DEBUG [UDP_Server::recv] received msg %s from %s.\n", msg, their_ip);
+//        msg[numbytes] = '\0';
         memcpy(&their_addr, &rep_addr, sizeof(sockaddr_storage));
+
         return numbytes;
     }
 
@@ -171,7 +111,7 @@ namespace udp_client_server
         return sendto(sockfd, msg, strlen(msg), 0, (const struct sockaddr *) &their_addr, sizeof(their_addr));
     }
 
-    int  UDP_Server::send_to(const char * destination, const char * msg) const{
+    int  UDP_Server::send_to(const char * destination, const char * msg, size_t msg_size) const{
         struct addrinfo hints{}, *hostai;  // ai stands for addrinfo
         int rv;
         char decimal_port[16];
@@ -188,8 +128,31 @@ namespace udp_client_server
             return -1;
         }
         // then we send
-        return sendto(sockfd, msg, strlen(msg), 0, hostai->ai_addr, hostai->ai_addrlen);
+        return sendto(sockfd, msg, msg_size, 0, hostai->ai_addr, hostai->ai_addrlen);
     }
+
+//    int  UDP_Server::send_to(const char * destination, const char * msg, size_t msg_size) const{
+//        struct addrinfo hints{}, *hostai;  // ai stands for addrinfo
+//        int rv;
+//        char decimal_port[16];
+//        snprintf(decimal_port, sizeof(decimal_port), "%d", f_port);
+//        decimal_port[sizeof(decimal_port) / sizeof(decimal_port[0]) - 1] = '\0';
+//
+//        // getaddrinfo to check for host
+//        memset(&hints, 0, sizeof hints);
+//        hints.ai_family = AF_INET;
+//        hints.ai_socktype = SOCK_DGRAM;
+//        // we get the host addrinfo
+//        if ((rv = getaddrinfo(destination, decimal_port, &hints, &hostai)) != 0) {
+//            printf("Failed to getaddrinfo for %s (%s). \n", destination, gai_strerror(rv));
+//            return -1;
+//        }
+//        // then we send
+//        if (msg_size > 0){
+//            return sendto(sockfd, msg, msg_size, 0, hostai->ai_addr, hostai->ai_addrlen);
+//        }
+//        return sendto(sockfd, msg, strlen(msg), 0, hostai->ai_addr, hostai->ai_addrlen);
+//    }
 
 
     int UDP_Server::timed_recv(char *msg, size_t max_size, int max_wait_ms)
@@ -217,4 +180,69 @@ namespace udp_client_server
         return -1;
     }
 
+
+    // CLIENT....
+//    UDP_Client::UDP_Client(const char * hostname, int port)
+//            : f_port(port)
+//            , f_addr(hostname)
+//    {
+//        struct addrinfo hints{}, *hostai;  // ai stands for addrinfo
+//        int rv;
+//        char decimal_port[16];
+//        snprintf(decimal_port, sizeof(decimal_port), "%d", f_port);
+//        decimal_port[sizeof(decimal_port) / sizeof(decimal_port[0]) - 1] = '\0';
+//
+//        // getaddrinfo to check for host
+//        memset(&hints, 0, sizeof hints);
+//        hints.ai_family = AF_INET;
+//        hints.ai_socktype = SOCK_DGRAM;
+//        // we get the host addrinfo
+//        while ((rv = getaddrinfo(hostname, decimal_port, &hints, &hostai)) != 0) {
+//            DPRINTF(("Failed to getaddrinfo for %s (%s). Trying again after %d seconds...\n",
+//                    hostname, gai_strerror(rv), THREAD_SLEEP_TIME))
+//            sleep(THREAD_SLEEP_TIME);  // try again until we find
+//        }
+//        f_addrinfo = hostai;
+//
+//        // Creating socket file descriptor
+//        if ( (sockfd = socket(hostai->ai_family, hostai->ai_socktype, hostai->ai_protocol)) < 0  ) {
+//            perror("socket creation failed");
+//            exit(EXIT_FAILURE);
+//        }
+//
+//    }
+//
+//    UDP_Client::~UDP_Client()
+//    {
+//        freeaddrinfo(f_addrinfo);
+//        close(sockfd);
+//    }
+//
+//    int UDP_Client::get_socket() const
+//    {
+//        return sockfd;
+//    }
+//
+//    int UDP_Client::get_port() const
+//    {
+//        return f_port;
+//    }
+//
+//    const char * UDP_Client::get_addr() const
+//    {
+//        return f_addr;
+//    }
+//
+///**
+// * This function sends \p msg through the UDP client socket. The function
+// * cannot be used to change the destination as it was defined when creating
+// * the UDP_Client object.
+// *
+// * \return -1 if an error occurs, otherwise the number of bytes sent. errno
+// * is set accordingly on error.
+// */
+//    int UDP_Client::send(const char *msg, size_t size)
+//    {
+//        return sendto(sockfd, msg, size, 0, f_addrinfo->ai_addr, f_addrinfo->ai_addrlen);
+//    }
 } // namespace udp_client_server

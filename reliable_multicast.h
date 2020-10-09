@@ -1,15 +1,26 @@
 //
-// Created by Thien Nguyen on 10/7/20.
+// Created by Thien Nguyen on 10/8/20.
 //
 
-#ifndef PRJ1_PRJ1_H
-#define PRJ1_PRJ1_H
+#ifndef PRJ1_RELIABLE_MULTICAST_H
+#define PRJ1_RELIABLE_MULTICAST_H
 
 #include <cstdint>
 #include <cstring>
+#include <string>
+#include <queue>
+#include <functional>
+
+#include "networkagent.h"
+#include "waittosync.h"
 #include "serializer.h"
 
+#define SERVER_PORT 4646
 #define MAX_MSG_SIZE 256
+#define MAX_NUM_HOSTS 16  // max 16 hosts
+#define MAX_HOST_NAME 256
+#define MAX_STRUCT_SIZE 20  // 20 bytes for 5 uint32_t
+
 
 typedef struct {
     uint32_t type;      // must be 1
@@ -92,78 +103,37 @@ void deserialize_seq_message(unsigned char * buf, SeqMessage &seqMessage){
 }
 
 
-// thread function
-[[noreturn]] void msg_receiver();
-void handle_datamsg(const DataMessage &dataMessage);
-void handle_ackmsg(const AckMessage &ackMessage);
-void handle_seqmsg(const SeqMessage &seqMessage);
-void multicast_datamsg(uint32_t data);
+auto cmp = [](QueuedMessage left, QueuedMessage right){
+    return left.sequence_number > right.sequence_number;
+};
 
-// utils
-void handle_param(int argc,  char* argv[]);
-int extract_int_from_string(std::string str);
+class ReliableMulticast{
+public:
+    ReliableMulticast(const char *hostfile, const udp_client_server::UDP_Server& communicator);
+    ~ReliableMulticast();
+
+    // thread function
+    [[noreturn]] void msg_receiver();
+    void handle_datamsg(const DataMessage &dataMessage);
+    void handle_ackmsg(const AckMessage &ackMessage);
+    void handle_seqmsg(const SeqMessage &seqMessage);
+    void multicast_datamsg(uint32_t data);
+
+    // utils
+    void static handle_param(int argc,  char* argv[]);
+    int static extract_int_from_string(std::string str);
+
+private:
+    /* set by user */
+    int num_hosts = 0;          // read by threads?
+
+    const char * current_container_name = nullptr;
+    int current_container_id;
+    int curr_msg_id = 1;
+    char** hostNames;
+    udp_client_server::UDP_Server communicator;
+    std::priority_queue<QueuedMessage, std::vector<QueuedMessage>, decltype(cmp)> q;
+};
 
 
-#endif //PRJ1_PRJ1_H
-
-
-///* read from hostFileName and store each line into lineArray */
-//int read_from_file(const char* fileName, char* lineArray[]){
-//    int numHosts = 0;
-//    int currSize = MAX_NUM_HOSTS;
-//    FILE* file = fopen(fileName, "r");
-//    if(file == nullptr) {
-//
-//        fprintf(stderr, "Error reading file %s", fileName);
-//        exit(1);
-//    }
-//    char line[MAX_HOST_NAME];
-//    while (fgets(line, sizeof(line), file)) {
-//        if (numHosts == MAX_NUM_HOSTS) {
-//            perror("Exceeded maximum hosts threshold. Please fix parameter in prj0.c");
-//            exit(1);
-//        }
-//        line[strcspn(line, "\r\n")] = 0;
-//        lineArray[numHosts] = new char[MAX_HOST_NAME];
-//        strcpy(lineArray[numHosts], line);
-//        numHosts++;
-//    }
-//    // for (int i = 0; i < numHosts; i++){
-//    //     DPRINTF(("%d: %s\n", i, lineArray[i]));
-//    // }
-//    fclose(file);
-//    return numHosts;
-//}
-//
-//void pack_data_message(DataMessage dataMessage, char * result){
-//    sprintf(result,"%d %d %d %d", dataMessage.type, dataMessage.sender, dataMessage.msg_id, dataMessage.data);
-//}
-//
-//void unpack_data_message(const char * msg, DataMessage &dataMessage){
-//        char temp[MAX_MSG_SIZE];
-//        strcpy(temp, msg);
-//        char * pch;
-//        pch = strtok(temp," ");
-//        int i = 0;
-//        while (pch != nullptr)
-//        {
-//            switch(i){
-//                case 0:
-//                    dataMessage.type = atoi(pch);
-//                    break;
-//                case 1:
-//                    dataMessage.sender = atoi(pch);
-//                    break;
-//                case 2:
-//                    dataMessage.msg_id = atoi(pch);
-//                    break;
-//                case 3:
-//                    dataMessage.data = atoi(pch);
-//                    break;
-//                default:
-//                    break;
-//            }
-//            pch = strtok (nullptr, " ");
-//            i++;
-//        }
-//}
+#endif //PRJ1_RELIABLE_MULTICAST_H

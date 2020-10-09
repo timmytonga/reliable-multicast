@@ -4,7 +4,7 @@
 
 #include <cstdio>
 #include <iostream>
-#include "networkagent.h"
+#include "../networkagent.h"
 
 #define SERVER_PORT 4646
 #define MAX_BUF_LEN 256

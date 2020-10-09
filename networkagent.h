@@ -14,39 +14,19 @@
 #include <arpa/inet.h>
 #include <cerrno>
 
-#include "utils.h"
+#define DEBUG
+
+
+#ifdef DEBUG
+# define DPRINTF(arg) printf arg
+#else
+# define DPRINTF(arg)
+#endif
 
 
 namespace udp_client_server
 {
     void *get_in_addr(struct sockaddr *sa);
-
-    class udp_client_server_runtime_error : public std::runtime_error
-    {
-    public:
-        explicit udp_client_server_runtime_error(const char *w) : std::runtime_error(w) {}
-    };
-
-
-    class UDP_Client
-    {
-    public:
-        UDP_Client(const char * hostname, int port);
-        ~UDP_Client();
-
-        int                 get_socket() const;
-        int                 get_port() const;
-        const char *        get_addr() const;
-
-        int                 send(const char *msg, size_t size);
-
-    private:
-        int                 sockfd;
-        int                 f_port;
-        const char *        f_addr;
-        struct addrinfo *   f_addrinfo;
-    };
-
 
     class UDP_Server
     {
@@ -61,8 +41,8 @@ namespace udp_client_server
 
         int                 recv(char *msg, size_t max_size);
         int                 reply(const char *msg);
-        int                 send_to(const char * destination, const char * msg) const;
-
+        int                 send_to(const char * destination, const char * msg, size_t msg_size) const;
+//        int                 send_to(const char * destination, const char * msg, size_t msg_size = -1) const;
         int                 timed_recv(char *msg, size_t max_size, int max_wait_ms);
 
     private:

@@ -112,7 +112,7 @@ void * check_up_with_host(void * ptr){
 }
 
 
-/* read from fileName and store each line into lineArray */
+/* read from hostFileName and store each line into lineArray */
 int read_from_file(const char* fileName, char* lineArray[]){
     int numHosts = 0;
     int currSize = ARRAY_MAX_SIZE;
