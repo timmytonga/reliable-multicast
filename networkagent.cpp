@@ -83,12 +83,12 @@ namespace udp_client_server
         return their_addr;
     }
 
-/** \brief Wait on a message.
- *
- * Wait until receive a message. Store the sender's address in their_addr
- *
- * \return The number of bytes read or -1 if an error occurs.
- */
+    /** \brief Wait on a message.
+     *
+     * Wait until receive a message. Store the sender's address in their_addr
+     *
+     * \return The number of bytes read or -1 if an error occurs.
+     */
     int UDP_Server::recv(char *msg, size_t max_size)
     /* return numbytes received. remember to set position at numbytes to '\0' for string*/
     {
@@ -106,9 +106,9 @@ namespace udp_client_server
         return numbytes;
     }
 
-    int UDP_Server::reply(const char* msg){
-        printf("UDP_Server::reply\n");
-        return sendto(sockfd, msg, strlen(msg), 0, (const struct sockaddr *) &their_addr, sizeof(their_addr));
+    int UDP_Server::reply(const char* msg, size_t msg_size){
+//        printf("UDP_Server::reply\n");
+        return sendto(sockfd, msg, msg_size, 0, (const struct sockaddr *) &their_addr, sizeof(their_addr));
     }
 
     int  UDP_Server::send_to(const char * destination, const char * msg, size_t msg_size) const{

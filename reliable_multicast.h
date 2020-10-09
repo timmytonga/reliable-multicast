@@ -10,16 +10,24 @@
 #include <string>
 #include <queue>
 #include <functional>
+#include <thread>
+#include <map>
 
 #include "networkagent.h"
 #include "waittosync.h"
-#include "serializer.h"
 
 #define SERVER_PORT 4646
 #define MAX_MSG_SIZE 256
 #define MAX_NUM_HOSTS 16  // max 16 hosts
 #define MAX_HOST_NAME 256
 #define MAX_STRUCT_SIZE 20  // 20 bytes for 5 uint32_t
+#define RECV_CAP 500  // for debugging
+
+#define UNDELIVERABLE 0
+#define DELIVERABLE 1
+#define DATAMSG_TYPE 1
+#define ACKMSG_TYPE 2
+#define SEQMSG_TYPE 3
 
 
 typedef struct {
@@ -56,55 +64,21 @@ typedef struct {
 } QueuedMessage;
 
 
-void serialize_data_message(const DataMessage &dataMessage, unsigned char * buf){
-    packi32(&buf[0], dataMessage.type);
-    packi32(&buf[4], dataMessage.sender);
-    packi32(&buf[8], dataMessage.msg_id);
-    packi32(&buf[12], dataMessage.data);
-}
+void packi32(unsigned char *buf, unsigned long int i);
+unsigned long int unpacku32(unsigned char *buf);
+void serialize_data_message(const DataMessage &dataMessage, unsigned char * buf);
+void deserialize_data_message(unsigned char * buf, DataMessage &dataMessage);
+void serialize_ack_message(const AckMessage &ackMessage, unsigned char * buf);
+void deserialize_ack_message(unsigned char * buf, AckMessage &ackMessage);
+void serialize_seq_message(const SeqMessage &seqMessage, unsigned char * buf);
+void deserialize_seq_message(unsigned char * buf, SeqMessage &seqMessage);
+int extract_int_from_string(std::string str);
 
-void deserialize_data_message(unsigned char * buf, DataMessage &dataMessage){
-    dataMessage.type = unpacku32(&buf[0]);
-    dataMessage.sender = unpacku32(&buf[4]);
-    dataMessage.msg_id = unpacku32(&buf[8]);
-    dataMessage.data = unpacku32(&buf[12]);
-}
-
-void serialize_ack_message(const AckMessage &ackMessage, unsigned char * buf){
-    packi32(&buf[0], ackMessage.type);
-    packi32(&buf[4], ackMessage.sender);
-    packi32(&buf[8], ackMessage.msg_id);
-    packi32(&buf[12], ackMessage.proposed_seq);
-    packi32(&buf[16], ackMessage.proposer);
-}
-
-void deserialize_ack_message(unsigned char * buf, AckMessage &ackMessage){
-    ackMessage.type = unpacku32(&buf[0]);
-    ackMessage.sender = unpacku32(&buf[4]);
-    ackMessage.msg_id = unpacku32(&buf[8]);
-    ackMessage.proposed_seq = unpacku32(&buf[12]);
-    ackMessage.proposer = unpacku32(&buf[16]);
-}
-
-void serialize_seq_message(const SeqMessage &seqMessage, unsigned char * buf){
-    packi32(&buf[0], seqMessage.type);
-    packi32(&buf[4], seqMessage.sender);
-    packi32(&buf[8], seqMessage.msg_id);
-    packi32(&buf[12], seqMessage.final_seq);
-    packi32(&buf[16], seqMessage.final_seq_proposer);
-}
-
-void deserialize_seq_message(unsigned char * buf, SeqMessage &seqMessage){
-    seqMessage.type = unpacku32(&buf[0]);
-    seqMessage.sender = unpacku32(&buf[4]);
-    seqMessage.msg_id = unpacku32(&buf[8]);
-    seqMessage.final_seq = unpacku32(&buf[12]);
-    seqMessage.final_seq_proposer = unpacku32(&buf[16]);
-}
-
-
-auto cmp = [](QueuedMessage left, QueuedMessage right){
-    return left.sequence_number > right.sequence_number;
+class mycomparison{
+public:
+    bool operator() (QueuedMessage left, QueuedMessage right){
+        return left.sequence_number > right.sequence_number;
+    }
 };
 
 class ReliableMulticast{
@@ -113,26 +87,28 @@ public:
     ~ReliableMulticast();
 
     // thread function
-    [[noreturn]] void msg_receiver();
     void handle_datamsg(const DataMessage &dataMessage);
     void handle_ackmsg(const AckMessage &ackMessage);
     void handle_seqmsg(const SeqMessage &seqMessage);
     void multicast_datamsg(uint32_t data);
-
-    // utils
-    void static handle_param(int argc,  char* argv[]);
-    int static extract_int_from_string(std::string str);
+    void static start_msg_receiver(ReliableMulticast* rm);  // for use in a thread
 
 private:
-    /* set by user */
+    typedef std::map<int, int> ProposerSeq;
+    /* private attributes */
     int num_hosts = 0;          // read by threads?
-
     const char * current_container_name = nullptr;
     int current_container_id;
-    int curr_msg_id = 1;
+    int curr_msg_id = 0;
+    int curr_seq_number = 1;
     char** hostNames;
     udp_client_server::UDP_Server communicator;
-    std::priority_queue<QueuedMessage, std::vector<QueuedMessage>, decltype(cmp)> q;
+    std::priority_queue<QueuedMessage, std::vector<QueuedMessage>, mycomparison> deliveryQueue;
+    std::vector<ProposerSeq> ackHistory;  // ackHistory[msg_id][
+
+    int recv_cap = 1;
+    // function
+    [[noreturn]] void msg_receiver();
 };
 
 

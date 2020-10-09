@@ -40,7 +40,7 @@ namespace udp_client_server
 
 
         int                 recv(char *msg, size_t max_size);
-        int                 reply(const char *msg);
+        int                 reply(const char *msg, size_t msg_size);
         int                 send_to(const char * destination, const char * msg, size_t msg_size) const;
 //        int                 send_to(const char * destination, const char * msg, size_t msg_size = -1) const;
         int                 timed_recv(char *msg, size_t max_size, int max_wait_ms);

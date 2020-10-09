@@ -45,7 +45,8 @@ int main(){
     auto cmp = [](QueuedMessage left, QueuedMessage right){
         return left.sequence_number > right.sequence_number;
     };
-    std::priority_queue<QueuedMessage, std::vector<QueuedMessage>, decltype(cmp)> q(cmp);
+    std::priority_queue<QueuedMessage, std::vector<QueuedMessage>, decltype(cmp)> q;
+    q = std::priority_queue<QueuedMessage, std::vector<QueuedMessage>, decltype(cmp)>(cmp);
 
     for (int i : {1,8,5,6,3,4,0,9,7,2}){
         q.push(makeQM(i, i*2));
