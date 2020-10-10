@@ -11,6 +11,7 @@
 #include <queue>
 #include <functional>
 #include <thread>
+#include <mutex>  // std::mutex
 #include <map>
 
 #include "networkagent.h"
@@ -37,6 +38,7 @@ typedef struct {
     uint32_t data;      // a dummy integer
 } DataMessage;
 
+
 typedef struct {
     uint32_t type;          // must be 2
     uint32_t sender;        // sender of DataMessage
@@ -53,6 +55,7 @@ typedef struct {
     uint32_t final_seq;             // proposed sequence number
     uint32_t final_seq_proposer;    // process id of proposer who poposed the final seq
 } SeqMessage;
+
 
 typedef struct {
     uint32_t        sequence_number;
@@ -74,12 +77,12 @@ void serialize_seq_message(const SeqMessage &seqMessage, unsigned char * buf);
 void deserialize_seq_message(unsigned char * buf, SeqMessage &seqMessage);
 int extract_int_from_string(std::string str);
 
-class mycomparison{
-public:
-    bool operator() (QueuedMessage left, QueuedMessage right){
-        return left.sequence_number > right.sequence_number;
-    }
+
+auto cmp = [](QueuedMessage left, QueuedMessage right){
+    return left.sequence_number == right.sequence_number ?
+           left.proposer > right.proposer : left.sequence_number > right.sequence_number;
 };
+
 
 class ReliableMulticast{
 public:
@@ -92,7 +95,6 @@ public:
     void handle_seqmsg(const SeqMessage &seqMessage);
     void multicast_datamsg(uint32_t data);
     void static start_msg_receiver(ReliableMulticast* rm);  // for use in a thread
-
 private:
     typedef std::map<int, int> ProposerSeq;
     /* private attributes */
@@ -103,12 +105,23 @@ private:
     int curr_seq_number = 1;
     char** hostNames;
     udp_client_server::UDP_Server communicator;
-    std::priority_queue<QueuedMessage, std::vector<QueuedMessage>, mycomparison> deliveryQueue;
+    std::vector<QueuedMessage> deliveryQueue;
+    std::mutex deliveryQueueMutex;
+    std::vector<QueuedMessage> deliveredMessage;  // this is to hold the final delivered msg
     std::vector<ProposerSeq> ackHistory;  // ackHistory[msg_id][
-
+    std::mutex ackHistoryMutex;  // protect ackHistory: sending thread create new entry and rcving threads modifying curr
     int recv_cap = 1;
     // function
     [[noreturn]] void msg_receiver();
+    void broadcast_seq_msg(const SeqMessage &seqMessage);  // simply send seqMessage to everybody
+    static std::pair<uint32_t, uint32_t> get_max_sequence_from_proposerseq_map(const ProposerSeq &pm);
+    static AckMessage make_ack_msg(uint32_t sender, uint32_t msg_id, uint32_t proposed_seq, uint32_t proposer);
+    static SeqMessage make_seq_msg(uint32_t sender, uint32_t msg_id, uint32_t final_seq, uint32_t final_seq_proposer);
+    static QueuedMessage make_queued_msg(uint32_t sequence_number, unsigned char status, uint32_t sender,
+                                         uint32_t msg_id, uint32_t data, uint32_t proposer);
+    int change_queued_msg_seq_and_status(uint32_t sender, uint32_t msg_id, uint32_t seq_to_change, uint32_t seq_proposer, unsigned char status);
+    void push_msg_to_deliveryqueue(QueuedMessage qm);
+    void deliver_msg_from_deliveryqueue();
 };
 
 
