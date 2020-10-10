@@ -5,6 +5,8 @@
 #ifndef PRJ1_RELIABLE_MULTICAST_H
 #define PRJ1_RELIABLE_MULTICAST_H
 
+//#define DEBUG
+
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -122,6 +124,8 @@ private:
     int change_queued_msg_seq_and_status(uint32_t sender, uint32_t msg_id, uint32_t seq_to_change, uint32_t seq_proposer, unsigned char status);
     void push_msg_to_deliveryqueue(QueuedMessage qm);
     void deliver_msg_from_deliveryqueue();
+    void print_delivery_queue();
+    void print_delivered_messages();
 };
 
 

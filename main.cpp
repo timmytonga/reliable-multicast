@@ -35,7 +35,7 @@ void handle_param(int argc,  char* argv[]){
         }
         if (strcmp(argv[i],"-c") == 0){
             num_msg_tosend = strtol(argv[i + 1], nullptr, 10);
-            if (num_msg_tosend <= 0){
+            if (num_msg_tosend < 0){
                 perror("Invalid count argument. Exiting...");
                 exit(1);
             }

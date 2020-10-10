@@ -93,11 +93,11 @@ namespace udp_client_server
     /* return numbytes received. remember to set position at numbytes to '\0' for string*/
     {
         char s[INET6_ADDRSTRLEN];
-        socklen_t addr_len;
         struct sockaddr_storage rep_addr{};
+        socklen_t addr_len = sizeof rep_addr;
         int numbytes;
         numbytes = recvfrom(sockfd, msg, max_size-1 , 0, (struct sockaddr *)&rep_addr, &addr_len);
-        if (numbytes == -1){perror("recvfrom error.... ."); exit(1);}
+        if (numbytes == -1){perror("UDP_Server::recv: recvfrom error.... ."); exit(1);}
 //        const char * their_ip = inet_ntop(rep_addr.ss_family, get_in_addr((struct sockaddr *)&rep_addr), s, sizeof s);
 //        printf("DEBUG [UDP_Server::recv] received msg %s from %s.\n", msg, their_ip);
 //        msg[numbytes] = '\0';

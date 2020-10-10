@@ -1,6 +1,6 @@
-#Total-order Reliable Multicast and Chandi-Lamport Global Snapshot Systems
+# Total-order Reliable Multicast and Chandi-Lamport Global Snapshot Systems
 
-##Total-order Reliable Multicast
+## Total-order Reliable Multicast
 - We implement the reliable multicast protocol that guarantees the total ordering of the sent messages (i.e. each process will have the same ordering of the delivered messages). This implementation can tolerate message drop/delay (by resending acknowledgement/data message after a set timeout) but does not tolerate process failure/crashing.
 
 - This is done by implementing the total order algorithm which uses sequence numbers (starting from 1 and increments everytime an event happens) to order incoming Data Message. Each process has a delivery queue that holds message along with their sequence number. In this project, each process spawns a receiving thread that performs a specific task depending on what type the message it receives is.

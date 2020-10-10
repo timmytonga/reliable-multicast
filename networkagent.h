@@ -14,15 +14,6 @@
 #include <arpa/inet.h>
 #include <cerrno>
 
-#define DEBUG
-
-
-#ifdef DEBUG
-# define DPRINTF(arg) printf arg
-#else
-# define DPRINTF(arg)
-#endif
-
 
 namespace udp_client_server
 {
