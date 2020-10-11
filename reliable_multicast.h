@@ -5,7 +5,7 @@
 #ifndef PRJ1_RELIABLE_MULTICAST_H
 #define PRJ1_RELIABLE_MULTICAST_H
 
-//#define DEBUG
+#define DEBUG
 
 #include <cstdint>
 #include <cstdlib>
@@ -27,6 +27,9 @@
 #define MAX_HOST_NAME 256
 #define MAX_STRUCT_SIZE 20  // 20 bytes for 5 uint32_t
 #define RECV_CAP 5000  // for debugging
+
+#define TIMEOUT             1000    // in miliseconds
+#define WATCHDOG_RESEND_CAP 50     // number of times for a watchdog
 
 #define UNDELIVERABLE 0
 #define DELIVERABLE 1
@@ -101,6 +104,9 @@ public:
     void handle_seqmsg(const SeqMessage &seqMessage);
     void multicast_datamsg(uint32_t data);
     void static start_msg_receiver(ReliableMulticast* rm);  // for use in a thread
+
+    // getters
+    int get_delay();
 private:
     typedef std::map<int, int> ProposerSeq;
     /* private attributes */
@@ -112,19 +118,22 @@ private:
     char** hostNames;
     udp_client_server::UDP_Server communicator;
     std::vector<QueuedMessage> deliveryQueue;
-    std::mutex deliveryQueueMutex;
     std::vector<QueuedMessage> deliveredMessage;  // this is to hold the final delivered msg
+    std::vector<AckMessage> alreadyAckedMessages;  // for sending acks
     std::map<int, ProposerSeq> ackHistory;  // ackHistory[msg_id] --> access
     std::map<int, int> dataHistory;  // to store the data of sent items
-    std::mutex ackHistoryMutex;  // protect ackHistory: sending thread create new entry and rcving threads modifying curr
-    std::mutex dataHistoryMutex;  // protect dataHistory
+    // std::vector<std::thread> watchdogThreads;  // to join them at the end
     int recv_cap = 1;
     // for help with testing variables
     double drop_rate;
     int delay_in_ms;
+    std::mutex ackHistoryMutex;  // protect ackHistory: sending thread create new entry and rcving threads modifying curr
+    std::mutex dataHistoryMutex;  // protect dataHistory
+    std::mutex deliveryQueueMutex;
     std::mutex testing_param_mutex;
 
     // function
+    void datamsg_watchdog(const DataMessage &dataMessage, const char * hostName) ;
     [[noreturn]] void msg_receiver();
     void broadcast_seq_msg(const SeqMessage &seqMessage);  // simply send seqMessage to everybody
     static std::pair<uint32_t, uint32_t> get_max_sequence_from_proposerseq_map(const ProposerSeq &pm);
@@ -140,7 +149,9 @@ private:
     void print_ack_history();
     static double random_uniform_from_0_to_1();
     int send_msg_with_drop_and_delay(const char *hostname, unsigned char (&serialized_packet)[MAX_STRUCT_SIZE]);  // this is to implement extra testing for sending
+    int reply_msg_with_drop_and_delay(unsigned char (&serialized_packet)[MAX_STRUCT_SIZE]);  // this is to implement extra testing for sending
 
+    void start_delay() const;
 };
 
 

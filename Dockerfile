@@ -7,6 +7,7 @@ ADD ./*.cpp /app/
 ADD ./*.h /app/
 ADD Hostfile /app/
 ADD rprj1.sh /app/
+ADD countdelaydroprate.sh /app/
 
 WORKDIR /app/
 
