@@ -8,6 +8,7 @@
 //#define DEBUG
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <queue>
@@ -15,6 +16,7 @@
 #include <thread>
 #include <mutex>  // std::mutex
 #include <map>
+#include <chrono>  // for sleep
 
 #include "networkagent.h"
 #include "waittosync.h"
@@ -24,7 +26,7 @@
 #define MAX_NUM_HOSTS 16  // max 16 hosts
 #define MAX_HOST_NAME 256
 #define MAX_STRUCT_SIZE 20  // 20 bytes for 5 uint32_t
-#define RECV_CAP 500  // for debugging
+#define RECV_CAP 5000  // for debugging
 
 #define UNDELIVERABLE 0
 #define DELIVERABLE 1
@@ -82,13 +84,15 @@ int extract_int_from_string(std::string str);
 
 auto cmp = [](QueuedMessage left, QueuedMessage right){
     return left.sequence_number == right.sequence_number ?
-           left.proposer > right.proposer : left.sequence_number > right.sequence_number;
+           left.sender > right.sender : left.sequence_number > right.sequence_number;
 };
 
 
 class ReliableMulticast{
 public:
-    ReliableMulticast(const char *hostfile, const udp_client_server::UDP_Server& communicator);
+    ReliableMulticast(const char *hostfile,
+                      const udp_client_server::UDP_Server& communicator,
+                      double drop_rate = 0.0, int delay_in_ms=0);
     ~ReliableMulticast();
 
     // thread function
@@ -110,9 +114,16 @@ private:
     std::vector<QueuedMessage> deliveryQueue;
     std::mutex deliveryQueueMutex;
     std::vector<QueuedMessage> deliveredMessage;  // this is to hold the final delivered msg
-    std::vector<ProposerSeq> ackHistory;  // ackHistory[msg_id][
+    std::map<int, ProposerSeq> ackHistory;  // ackHistory[msg_id] --> access
+    std::map<int, int> dataHistory;  // to store the data of sent items
     std::mutex ackHistoryMutex;  // protect ackHistory: sending thread create new entry and rcving threads modifying curr
+    std::mutex dataHistoryMutex;  // protect dataHistory
     int recv_cap = 1;
+    // for help with testing variables
+    double drop_rate;
+    int delay_in_ms;
+    std::mutex testing_param_mutex;
+
     // function
     [[noreturn]] void msg_receiver();
     void broadcast_seq_msg(const SeqMessage &seqMessage);  // simply send seqMessage to everybody
@@ -126,6 +137,10 @@ private:
     void deliver_msg_from_deliveryqueue();
     void print_delivery_queue();
     void print_delivered_messages();
+    void print_ack_history();
+    static double random_uniform_from_0_to_1();
+    int send_msg_with_drop_and_delay(const char *hostname, unsigned char (&serialized_packet)[MAX_STRUCT_SIZE]);  // this is to implement extra testing for sending
+
 };
 
 
