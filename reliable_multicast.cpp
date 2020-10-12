@@ -16,7 +16,9 @@ ReliableMulticast::ReliableMulticast(const char *hostFileName,
     if (current_container_name == nullptr){perror("Obtaining current container's name failed (from wait to sync). Exiting.\n");exit(1);}
     // that also extracts the id
     current_container_id = extract_int_from_string(std::string(current_container_name));
-
+    for (int i = 0; i<num_hosts; i++){
+        hostIDtoHostName.insert(std::make_pair(extract_int_from_string(hostNames[i]), std::string(hostNames[i])));
+    }
     printf("Current container's name: %s and id: %d\n", current_container_name, current_container_id);
 
 }
@@ -62,8 +64,8 @@ void ReliableMulticast::handle_datamsg(const DataMessage &dataMessage){
      * If we have seen this before (i.e. a duplicate message), we resend the old ack
      * otherwise we send a new ack
      * */
-//    DPRINTF(("*** Inside handle_datamsg: type %d with sender_id %d and msg_id %d and data %d\n"
-//            , dataMessage.type, dataMessage.sender, dataMessage.msg_id, dataMessage.data));
+    DPRINTF(("*** Received data message: type %d with sender_id %d and msg_id %d and data %d\n"
+            , dataMessage.type, dataMessage.sender, dataMessage.msg_id, dataMessage.data));
     for (AckMessage am : alreadyAckedMessages){  // check to see if we have already acked this message
         if (am.sender == dataMessage.sender && am.msg_id == dataMessage.msg_id){  // this dataMessage has already been acked
             // we resend it
@@ -94,6 +96,45 @@ void ReliableMulticast::handle_datamsg(const DataMessage &dataMessage){
     // then we are supposed to hear back from the sender a final sequence number (which we can then handle elsewhere)
     // suppose we don't hear back after a while....
     //  --> we should send the ack again (bc the ack might be dropped or the seq might be dropped)
+    DPRINTF(("handle_datamsg: spawning watchdog thread for sent out ack...\n"));
+    const char * rep_host_name = hostIDtoHostName[dataMessage.sender].c_str();
+    // spawning this watchdog to resend ackmsg correspondingly
+    std::thread watchdog(&ReliableMulticast::ackmsg_watchdog, this, ackMessage, rep_host_name); watchdog.detach();
+}
+
+
+void ReliableMulticast::ackmsg_watchdog(const AckMessage &ackMessage, const char * hostName){
+    /* This watchdog watches for whether the message corresponding to the ackMessage has received a final sequence
+     * After a timeout, we check if we have received a responding seqMessage from host
+     * If not, we resend the ackMessage to the host and wait again */
+    int watchdog_resend_cap = 0;
+    while (watchdog_resend_cap++ < WATCHDOG_RESEND_CAP){
+        DPRINTF(("[ackmsg_watchdog] Attempt %d for msg (%d, %d) from host %s. Sleeping for %d miliseconds...\n",
+                watchdog_resend_cap, ackMessage.msg_id, ackMessage.sender, hostName, TIMEOUT));
+        usleep(TIMEOUT*1000);  // sleep for TIMEOUT miliseconds
+        // when wake up, we check if we have received a responding seq message for this msg
+        seqMessageHistoryMutex.lock();
+        for (SeqMessage sm : seqMessageHistory){  // a seq is in here if we receive a seqmsg or sent out one
+            if (sm.sender == ackMessage.sender && sm.msg_id == ackMessage.msg_id){  // we have found it in the SeqHistory
+                DPRINTF(("[ackmsg_WATCHDOG FINISHED] Found an SEQ for msg (%d, %d) and host %s. Terminating!\n",
+                        ackMessage.msg_id, ackMessage.sender, hostName));
+                seqMessageHistoryMutex.unlock();
+                return;
+            }
+        }
+        seqMessageHistoryMutex.unlock();
+        // we get here when we weren't able to find a corresponding seq msg for the ack in the seqhistory
+        // we resend the ack to the host
+        DPRINTF(("[ackmsg_WATCHDOG TIMEOUT] Haven't received Ack for msg (%d, %d) from host %s. Resending ack and Resleeping.\n ",
+                ackMessage.msg_id, ackMessage.sender, hostName));
+        unsigned char serialized_packet[MAX_STRUCT_SIZE];
+        serialize_ack_message(ackMessage, serialized_packet);
+        int rv = send_msg_with_drop_and_delay(hostName, serialized_packet);
+        if (rv == -1){perror("Error sending message. Exiting...\n");exit(1);}
+        if (rv == -22) DPRINTF(("[FROM datamsg_WATCHDOG] Message (%d, %d) to %s was dropped\n",
+                    ackMessage.msg_id, ackMessage.sender, hostName));
+    }
+    printf("ackmsg_WATCHDOG WAITED MAXIMUM TIMES! SOMETHING WENT WRONG...HOST %s EITHER CRASHED OR NETWORK PROBLEM\n", hostName);
 }
 
 
@@ -102,13 +143,14 @@ void ReliableMulticast::handle_ackmsg(const AckMessage &ackMessage){
     *  ackHistory[ackMessage.msg_id] contains the history of received acks for this msg.
     ** if the Ack is for an older msg, we resend the sequence number. Otherwise we handle the new one: */
 
-//    DPRINTF(("*** Inside handle_ackmsg: type %d with sender_id %d, msg_id %d, seq %d, and proposer %d\n"
-//        , ackMessage.type, ackMessage.sender, ackMessage.msg_id, ackMessage.proposed_seq, ackMessage.proposer));
+    DPRINTF(("*** Received ACK MSG with sender_id %d, msg_id %d, seq %d, and proposer %d\n"
+        , ackMessage.type, ackMessage.sender, ackMessage.msg_id, ackMessage.proposed_seq, ackMessage.proposer));
 
     uint32_t msg_id = ackMessage.msg_id;
     ackHistoryMutex.lock();
     if (ackHistory[msg_id].count(ackMessage.proposer) == 0){  // this means we haven't receive this ack before
         // we add it to the history
+        curr_seq_number++;  // to avoid clashing
         ackHistory[msg_id].insert(std::make_pair(ackMessage.proposer, ackMessage.proposed_seq));
         if(ackHistory[msg_id].size() == (num_hosts-1)){  // we have collected enough ACKs for this msg
 //            DPRINTF(("[handle_ACKmsg] we have received enough ACKS. Attempting to add and deliver.\n"));print_ack_history();
@@ -117,6 +159,9 @@ void ReliableMulticast::handle_ackmsg(const AckMessage &ackMessage){
             uint32_t finalseq = finalSeqAndProposer.first;
             uint32_t finalseq_proposer = finalSeqAndProposer.second;
             SeqMessage seqMessage = make_seq_msg(ackMessage.sender, ackMessage.msg_id, finalseq, finalseq_proposer);
+            seqMessageHistoryMutex.lock();
+            seqMessageHistory.push_back(seqMessage);
+            seqMessageHistoryMutex.unlock();
             broadcast_seq_msg(seqMessage);  // this sends the seqMessage to everybody --> they should perform the step below
             // now we need to update our own delivery queue with this max number -- it should be deliverable now
             deliveryQueueMutex.lock();
@@ -129,9 +174,30 @@ void ReliableMulticast::handle_ackmsg(const AckMessage &ackMessage){
     } // otherwise if we've seen it then we see if it's from an ACK sending process that hasn't received final seq after a while
     else if (ackHistory[msg_id].size() == (num_hosts-1)){ // this means we have finalized and sent the seq before
         // resend final sequence number
+        DPRINTF(("RECEIVED A DUPLICATE ACK FROM %d FOR MSG (%d, %d). RESENDING SEQ...\n",
+                ackMessage.proposer, ackMessage.msg_id, ackMessage.sender));
+        int found = 0;
+        seqMessageHistoryMutex.lock();
+        for (SeqMessage sm : seqMessageHistory){
+            if(sm.msg_id == msg_id && sm.sender == ackMessage.sender){
+                found = 1;
+                unsigned char serialized_packet[MAX_STRUCT_SIZE];
+                serialize_seq_message(sm, serialized_packet);
+                int rv = reply_msg_with_drop_and_delay(serialized_packet);
+                if (rv == -1){perror("[handle_ackmsg] Error sending message. Exiting...\n"); seqMessageHistoryMutex.unlock();
+                exit(1);}
+                if (rv == -22) printf("[handle_ackmsg] Resending SeqMessage for (%d, %d) to process_id %d was dropped\n",
+                                      sm.msg_id, sm.sender, ackMessage.proposer);
+                break;
+            }
+        }
+        seqMessageHistoryMutex.unlock();
+        if (found == 0){  // we haven't found the seqMessage.... strange
+            perror("[handle_ackmsg] Cannot find seqmsg in history. Some weird error happened. Exiting...\n");
+            ackHistoryMutex.unlock(); exit(1);
+        }
     }
     ackHistoryMutex.unlock();
-
 }
 
 
@@ -141,9 +207,8 @@ void ReliableMulticast::handle_seqmsg(const SeqMessage &seqMessage){
     * if the seqmessage's message is not in our delivery queue (it must've been delivered already), then we simply ignore it
     * otherwise we reorder the queue based on the message's new seq number and mark it deliverable
     ** then we peek at the top of the queue and pop all deliverable messages until they are no longer deliverable*/
-
-//    DPRINTF(("INSIDE handle_SEQmsg with msg_id %d, sender %d, seq %d, proposer %d\n",
-//        seqMessage.msg_id, seqMessage.sender, seqMessage.final_seq, seqMessage.final_seq_proposer));
+    DPRINTF(("*** Received SEQmsg with msg_id %d, sender %d, seq %d, proposer %d\n",
+        seqMessage.msg_id, seqMessage.sender, seqMessage.final_seq, seqMessage.final_seq_proposer));
 #ifdef DEBUG
     print_delivery_queue();
 #endif
@@ -163,6 +228,10 @@ void ReliableMulticast::handle_seqmsg(const SeqMessage &seqMessage){
         perror("handle_seqmsg ERROR: COULDN'T LOCATE MESSAGE FOR INCOMING SEQMESSAGE. EXITING...\n");
         exit(1);
     }
+    // add it to the history if we haven't received it... then attempt to deliver
+    seqMessageHistoryMutex.lock();
+    seqMessageHistory.push_back(seqMessage);
+    seqMessageHistoryMutex.unlock();
     deliver_msg_from_deliveryqueue();
 }
 
@@ -208,7 +277,7 @@ void ReliableMulticast::multicast_datamsg(uint32_t data){
             rv = send_msg_with_drop_and_delay(hostNames[i], serialized_packet);
             if (rv == -1){perror("Error sending message. Exiting...\n"); exit(1);}
             if (rv == -22)
-                DPRINTF(("Message (%d) to %s was dropped\n", dataMessage.msg_id, hostNames[i]));
+                DPRINTF(("[multicast_datamsg] Message (%d) to %s was dropped\n", dataMessage.msg_id, hostNames[i]));
             else
                 DPRINTF(("*** Multicasted message of type %d with sender_id %d and msg_id %d and data %d to %s\n", dataMessage.type, dataMessage.sender, dataMessage.msg_id, dataMessage.data, hostNames[i]));
             // after sending out a message, we must make sure that we receive an ack after a certain timeout
@@ -230,8 +299,8 @@ void ReliableMulticast::datamsg_watchdog(const DataMessage &dataMessage, const c
      * This can be fixed by resending the dataMessage to cure case 1 or to signal for resending ACK */
     int watchdog_resend_cap = 0;
     while (watchdog_resend_cap++ < WATCHDOG_RESEND_CAP){
-        DPRINTF(("[Attempt %d] Hello this is datamsg_watchdog for msg_id %d and host %s. Sleeping for %d miliseconds...\n",
-                watchdog_resend_cap, dataMessage.msg_id, hostName, TIMEOUT));
+        DPRINTF(("[Attempt %d] Hello this is datamsg_watchdog for msg (%d, %d) and host %s. Sleeping for %d miliseconds...\n",
+                watchdog_resend_cap, dataMessage.msg_id, dataMessage.sender, hostName, TIMEOUT));
         usleep(TIMEOUT*1000);  // first we sleep for TIMEOUT miliseconds
         // when we wake up, we check if that message has been acked by this host yet
         ackHistoryMutex.lock();
@@ -244,7 +313,7 @@ void ReliableMulticast::datamsg_watchdog(const DataMessage &dataMessage, const c
         int hostID = extract_int_from_string(hostName);
         if (historyfordm->second.count(hostID) == 0){  // this means we haven't received an Ack for that host
             // we resend the data message and wait again...
-            DPRINTF(("[WATCHDOG TIMEOUT] Haven't received Ack for msg_id %d from host %s. Resending datamessage and Resleeping.\n ",
+            DPRINTF(("[datamsg_WATCHDOG TIMEOUT] Haven't received Ack for msg_id %d from host %s. Resending datamessage and Resleeping.\n ",
                     dataMessage.msg_id, hostName));
             unsigned char serialized_packet[MAX_STRUCT_SIZE];
             serialize_data_message(dataMessage, serialized_packet);
@@ -254,24 +323,25 @@ void ReliableMulticast::datamsg_watchdog(const DataMessage &dataMessage, const c
                 ackHistoryMutex.unlock();
                 exit(1);
             }
-            if (rv == -22) DPRINTF(("[FROM WATCHDOG] Message to %s was dropped\n", hostName));
+            if (rv == -22) DPRINTF(("[FROM datamsg_WATCHDOG] Message (%d, %d) to %s was dropped\n",
+                    dataMessage.msg_id, dataMessage.sender, hostName));
         } else { // this means we have received an ACK !!! we can terminate
-            DPRINTF(("[WATCHDOG FINISHED] Found an ACK for msg_id %d and host %s. Terminating!\n", dataMessage.msg_id, hostName));
+            DPRINTF(("[datamsg_WATCHDOG FINISHED] Found an ACK for msg_id %d and host %s. Terminating!\n", dataMessage.msg_id, hostName));
             ackHistoryMutex.unlock();
             return;
         }
         ackHistoryMutex.unlock();
     }
-    printf("WATCHDOG WAITED MAXIMUM TIMES! SOMETHING WENT WRONG...HOST %s EITHER CRASHED OR NETWORK PROBLEM\n", hostName);
+    printf("datamsg_WATCHDOG WAITED MAXIMUM TIMES! SOMETHING WENT WRONG...HOST %s EITHER CRASHED OR NETWORK PROBLEM\n", hostName);
 }
 
 
 int ReliableMulticast::reply_msg_with_drop_and_delay(unsigned char (&serialized_packet)[20]) {
     start_delay();
-//    if (random_uniform_from_0_to_1() < drop_rate){
-//        DPRINTF(("[Testing] Replying dropped msg!\n"));
-//        return -22;
-//    }
+    if (random_uniform_from_0_to_1() < drop_rate){
+        DPRINTF(("[Testing] Replying dropped msg!\n"));
+        return -22;
+    }
     return communicator.reply(reinterpret_cast<const char *>(serialized_packet), sizeof(serialized_packet));
 }
 
@@ -295,8 +365,8 @@ void ReliableMulticast::broadcast_seq_msg(const SeqMessage &seqMessage){
     int rv;
     for (int i =0; i< num_hosts; i++){
         if (strcmp(hostNames[i], current_container_name) != 0){
-            rv = communicator.send_to(hostNames[i], reinterpret_cast<const char *>(serialized_packet), sizeof(serialized_packet));
-//            rv = send_msg_with_drop_and_delay(hostNames[i], serialized_packet);
+//            rv = communicator.send_to(hostNames[i], reinterpret_cast<const char *>(serialized_packet), sizeof(serialized_packet));
+            rv = send_msg_with_drop_and_delay(hostNames[i], serialized_packet);
             if (rv == -1){perror("Error sending message. Exiting...\n"); exit(1);}
             if (rv == -22) printf("SeqMessage for (%d, %d) to %s was dropped\n", seqMessage.msg_id, seqMessage.sender, hostNames[i]);
 
@@ -313,10 +383,10 @@ void ReliableMulticast::push_msg_to_deliveryqueue(QueuedMessage qm){
 
 
 void ReliableMulticast::print_delivery_queue(){
-    printf("=== deliveryQueue (size %lu) ====\n", deliveryQueue.size());
+    printf("=== deliveryQueue (min-heap of size %lu) ====\n", deliveryQueue.size());
     for (const QueuedMessage &qm: deliveryQueue){
-        printf("\tseq %d, msg_id %d, sender %d, status %d\n",
-               qm.sequence_number, qm.msg_id, qm.sender, qm.status);
+        printf("\tseq/proposer (%d, %d), msg_id/sender (%d, %d)\n",
+               qm.sequence_number, qm.proposer, qm.msg_id, qm.sender);
     }
     printf("=================================\n");
 }
@@ -350,8 +420,8 @@ void ReliableMulticast::print_delivered_messages() {
     printf("=== delivered messages so far (size %lu) ====\n", deliveredMessage.size());
     int i = 0;
     for (const QueuedMessage &qm: deliveredMessage){
-        printf("\t%d: seq/sender (%d, %d), msg_id/proposer (%d, %d)\n", i++,
-               qm.sequence_number, qm.sender, qm.msg_id, qm.proposer);
+        printf("\t%d: seq/proposer (%d, %d), msg_id/sender (%d, %d)\n", i++,
+               qm.sequence_number, qm.proposer, qm.msg_id, qm.sender);
     }
     printf("=================================\n");
 }

@@ -28,9 +28,10 @@
 #define MAX_STRUCT_SIZE 20  // 20 bytes for 5 uint32_t
 #define RECV_CAP 5000  // for debugging
 
-#define TIMEOUT             1000    // in miliseconds
-#define WATCHDOG_RESEND_CAP 50     // number of times for a watchdog
+#define TIMEOUT             5000    // in miliseconds
+#define WATCHDOG_RESEND_CAP 500     // number of times for a watchdog
 
+// do not modify below def
 #define UNDELIVERABLE 0
 #define DELIVERABLE 1
 #define DATAMSG_TYPE 1
@@ -87,7 +88,7 @@ int extract_int_from_string(std::string str);
 
 auto cmp = [](QueuedMessage left, QueuedMessage right){
     return left.sequence_number == right.sequence_number ?
-           left.sender > right.sender : left.sequence_number > right.sequence_number;
+           left.proposer > right.proposer : left.sequence_number > right.sequence_number;
 };
 
 
@@ -109,6 +110,7 @@ public:
     int get_delay();
 private:
     typedef std::map<int, int> ProposerSeq;
+    std::map<int,std::string> hostIDtoHostName;  // the other way can be obtained from extract_int_from_string
     /* private attributes */
     int num_hosts = 0;          // read by threads?
     const char * current_container_name = nullptr;
@@ -117,9 +119,10 @@ private:
     int curr_seq_number = 1;
     char** hostNames;
     udp_client_server::UDP_Server communicator;
-    std::vector<QueuedMessage> deliveryQueue;
+    std::vector<QueuedMessage> deliveryQueue;       // [SHARED BY THREADS]
     std::vector<QueuedMessage> deliveredMessage;  // this is to hold the final delivered msg
-    std::vector<AckMessage> alreadyAckedMessages;  // for sending acks
+    std::vector<AckMessage> alreadyAckedMessages;  // for resending acks
+    std::vector<SeqMessage> seqMessageHistory;      // [SHARED BY THREADS] keep track of all received/sent seq messages
     std::map<int, ProposerSeq> ackHistory;  // ackHistory[msg_id] --> access
     std::map<int, int> dataHistory;  // to store the data of sent items
     // std::vector<std::thread> watchdogThreads;  // to join them at the end
@@ -130,10 +133,11 @@ private:
     std::mutex ackHistoryMutex;  // protect ackHistory: sending thread create new entry and rcving threads modifying curr
     std::mutex dataHistoryMutex;  // protect dataHistory
     std::mutex deliveryQueueMutex;
-    std::mutex testing_param_mutex;
+    std::mutex seqMessageHistoryMutex;
 
     // function
-    void datamsg_watchdog(const DataMessage &dataMessage, const char * hostName) ;
+    void datamsg_watchdog(const DataMessage &dataMessage, const char * hostName);  // keep resending datamsg until we have received an ack
+    void ackmsg_watchdog(const AckMessage &ackMessage, const char * hostName);
     [[noreturn]] void msg_receiver();
     void broadcast_seq_msg(const SeqMessage &seqMessage);  // simply send seqMessage to everybody
     static std::pair<uint32_t, uint32_t> get_max_sequence_from_proposerseq_map(const ProposerSeq &pm);
