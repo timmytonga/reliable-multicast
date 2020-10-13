@@ -18,6 +18,8 @@
 #define OUTBOUND 2
 #define MAX_STRUCT_SIZE     20  // 20 bytes for 5 uint32_t
 
+#define DUPPRINT(fp, fmt...) do {printf(fmt);fprintf(fp,fmt);} while(0)
+
 class ReliableMulticast;
 typedef std::vector<unsigned char> ByteVector;
 

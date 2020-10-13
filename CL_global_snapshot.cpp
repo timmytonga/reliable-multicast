@@ -232,48 +232,54 @@ void CL_Global_Snapshot::tell_rm_to_stop_recording() const {
 
 
 void CL_Global_Snapshot::print_local_snapshot() {
-    printf("************************ LOCALSNAPSHOT **********************\n");
+//    FILE * fp;
+//    char filename[40];
+//    sprintf(filename, "container%d.localsnapshot", curr_container_id);
+//
+//    printf("Creating file...\n");
+//    fp = fopen(filename, "w");
+//    if (fp == nullptr) printf("[printlocalsnapshot] ERROR CREATING FILE.\n");
+//    DUPPRINT(fp, "Created file %s to store local snapshot.\n", filename);
+
+    DUPPRINT(stderr, "************************ LOCALSNAPSHOT for Process %d**********************\n", curr_container_id);
     auto deliveredMessage = locsnap.deliveredMessage;
     auto deliveryQueue = locsnap.deliveryQueue;
 
-    printf("=== deliveryQueue (min-heap of size %lu) ====\n", deliveryQueue.size());
+    DUPPRINT(stderr, "=== deliveryQueue (min-heap of size %lu) ====\n", deliveryQueue.size());
     for (const QueuedMessage &qm: deliveryQueue){
-        printf("\tseq/proposer (%d, %d), msg_id/sender (%d, %d)\n",
+        DUPPRINT(stderr,"\tseq/proposer (%d, %d), msg_id/sender (%d, %d)\n",
                qm.sequence_number, qm.proposer, qm.msg_id, qm.sender);
     }
-    printf("=================================\n\n");
+    DUPPRINT(stderr,"=================================\n\n");
 
-    printf("=== delivered messages so far (size %lu) ====\n", deliveredMessage.size());
+    DUPPRINT(stderr,"=== delivered messages so far (size %lu) ====\n", deliveredMessage.size());
     int i = 0;
     for (const QueuedMessage &qm: deliveredMessage){
-        printf("\t%d: seq/proposer (%d, %d), msg_id/sender (%d, %d)\n", i++,
+        DUPPRINT(stderr, "\t%d: seq/proposer (%d, %d), msg_id/sender (%d, %d)\n", i++,
                qm.sequence_number, qm.proposer, qm.msg_id, qm.sender);
     }
-    printf("=================================\n\n");
+    DUPPRINT(stderr,"=================================\n\n");
 
 
-    printf("================== CHANNEL STATES:============== \n");
-    printf("Inbound channels: \n");
+    DUPPRINT(stderr,"================== CHANNEL STATES:============== \n");
+    DUPPRINT(stderr,"Inbound channels: \n");
     for (const auto& kv : inboundChannelState){
-        printf("\tFrom %d:\n", kv.first);
+        DUPPRINT(stderr,"\tFrom %d:\n", kv.first);
         for (const auto& m : kv.second){
-            printf("\t\t%s\n", m.c_str());
+            DUPPRINT(stderr,"\t\t%s\n", m.c_str());
         }
     }
-    printf("\n\nOutbound channels: \n");
+    DUPPRINT(stderr,"\n\nOutbound channels: \n");
     for (const auto& kv : outboundChannelState){
-        printf("\tTo %d:\n", kv.first);
+        DUPPRINT(stderr,"\tTo %d:\n", kv.first);
         for (const auto& m : kv.second){
-            printf("\t\t%s\n", m.c_str());
+            DUPPRINT(stderr,"\t\t%s\n", m.c_str());
         }
     }
-    printf("************************ END LOCAL SNAPSHOT *************************\n");
-
+    DUPPRINT(stderr,"************************ END LOCAL SNAPSHOT for Process %d*************************\n", curr_container_id);
+    fclose(stderr);
 }
 
 
-CL_Global_Snapshot::~CL_Global_Snapshot() {
-
-
-}
+CL_Global_Snapshot::~CL_Global_Snapshot() = default;
 
