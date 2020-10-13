@@ -4,16 +4,17 @@
 
 #include "reliable_multicast.h"
 
-long num_msg_tosend = 0;
+long num_msg_tosend = -1;
 double drop_rate = 0;
 int delay_in_ms = 0;
+int snapshotafter = -1;
 
 const char * hostFileName;
 void handle_param(int argc,  char* argv[]);
 
 int main(int argc, char* argv[]){
     handle_param(argc, argv);  // first we obtain the count and hostFileName
-    udp_client_server::UDP_Server comm(SERVER_PORT);
+    client_server::UDP_Server comm(SERVER_PORT);
     ReliableMulticast reliableMulticast(hostFileName, comm,
                                         drop_rate, delay_in_ms);  // this will perform the processing and communicating
 
@@ -22,6 +23,9 @@ int main(int argc, char* argv[]){
     for (int i = 0; i<num_msg_tosend; i++){
         reliableMulticast.multicast_datamsg(i*198%27);  // semi arbitrary data
 //        sleep(1);
+        if (i == snapshotafter){  // so we take snapshot once
+            reliableMulticast.initiate_snapshot();
+        }
     }
     receiver_thread.join();
 }
@@ -55,5 +59,20 @@ void handle_param(int argc,  char* argv[]){
                 exit(1);
             }
         }
+        else if (strcmp(argv[i], "-X") == 0) {
+            snapshotafter = atoi(argv[i+1]);
+            if (snapshotafter < 0 || snapshotafter > num_msg_tosend){
+                fprintf(stderr, "Bad snapshot value: %d. Please enter an int in [0,count]\n", snapshotafter);
+                exit(1);
+            }
+        }
+        else {
+            printf("Usage: %s -h <hostfile> -c <send_msg_count> [-d <drop_rate> -t <delay_in_ms> -X <snapshot-after>]\n", argv[0]);
+            exit(1);
+        }
+    }
+    if (num_msg_tosend == -1){
+        printf("Usage: %s -h <hostfile> -c <send_msg_count> [-d <drop_rate> -t <delay_in_ms> -X <snapshot-after>]\n", argv[0]);
+        exit(1);
     }
 }

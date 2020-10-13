@@ -5,9 +5,10 @@
 #include "reliable_multicast.h"
 
 ReliableMulticast::ReliableMulticast(const char *hostFileName,
-                                     const udp_client_server::UDP_Server& comm,
+                                     const client_server::UDP_Server& comm,
                                      double drop_rate, int delay_in_ms)
-        : communicator(comm), deliveryQueue{}, ackHistory{}, drop_rate(drop_rate), delay_in_ms(delay_in_ms){
+        : communicator(comm), deliveryQueue{}, ackHistory{}, drop_rate(drop_rate),
+        delay_in_ms(delay_in_ms), snapshot(nullptr){
     // user should make sure drop_rate and delay_in_ms are reasonable values.
     hostNames = new char*[MAX_NUM_HOSTS];
     num_hosts = wait_to_sync::read_from_file(hostFileName, hostNames);
@@ -20,7 +21,11 @@ ReliableMulticast::ReliableMulticast(const char *hostFileName,
         hostIDtoHostName.insert(std::make_pair(extract_int_from_string(hostNames[i]), std::string(hostNames[i])));
     }
     printf("Current container's name: %s and id: %d\n", current_container_name, current_container_id);
-
+    /* global snapshot */
+    recordMessages = false;
+    snapshot.set_rm(this);
+    std::thread snapshotListener(&CL_Global_Snapshot::listen_for_incoming_connections, &snapshot);
+    snapshotListener.detach();  // maybe join elsewhere?
 }
 
 [[noreturn]] void ReliableMulticast::msg_receiver(){
@@ -34,6 +39,15 @@ ReliableMulticast::ReliableMulticast(const char *hostFileName,
         DPRINTF(("Waiting for new msg...\n"));
         numbytes = communicator.recv(reinterpret_cast<char *>(msg_buf), MAX_MSG_SIZE);
         if (numbytes == -1) {perror("msg_receiver: recvfrom error..."); exit(1);}
+        recordMessagesMutex.lock();  // this is for global snapshot
+        if (recordMessages){  // receiving msgs
+//            printf("[debug msg_receiver] we are told to record msgs!\n");
+            snapshot.inboundMessageBufferMutex.lock();
+            snapshot.inboundMessageBuffer.push(ByteVector(msg_buf, msg_buf+MAX_STRUCT_SIZE));
+            snapshot.inboundMessageBufferMutex.unlock();
+//            printf("[debug msg_receiver] successful recorded a msg!\n");
+        }
+        recordMessagesMutex.unlock();
         type = unpacku32(&msg_buf[0]);
 //        DPRINTF(("Received msg is of type: %lu\n", type));
         switch (type) {
@@ -144,7 +158,7 @@ void ReliableMulticast::handle_ackmsg(const AckMessage &ackMessage){
     ** if the Ack is for an older msg, we resend the sequence number. Otherwise we handle the new one: */
 
     DPRINTF(("*** Received ACK MSG with sender_id %d, msg_id %d, seq %d, and proposer %d\n"
-        , ackMessage.type, ackMessage.sender, ackMessage.msg_id, ackMessage.proposed_seq, ackMessage.proposer));
+        , ackMessage.sender, ackMessage.msg_id, ackMessage.proposed_seq, ackMessage.proposer));
 
     uint32_t msg_id = ackMessage.msg_id;
     ackHistoryMutex.lock();
@@ -217,17 +231,22 @@ void ReliableMulticast::handle_seqmsg(const SeqMessage &seqMessage){
                                               seqMessage.final_seq, seqMessage.final_seq_proposer, DELIVERABLE);
     deliveryQueueMutex.unlock();
 
+    deliveredMessageMutex.lock();
     if (rv == -1){  // we didn't find it in the deliveryqueue... it must've been in our deliveredMessage list
         for (QueuedMessage qm : deliveredMessage){
             if (qm.msg_id == seqMessage.msg_id && qm.sender == seqMessage.sender){
                 DPRINTF(("handle_seqmsg received duplicate seqmessage for sender %d and msg_id %d with finalsequence %d\n",
                         seqMessage.sender, seqMessage.msg_id, seqMessage.final_seq_proposer));
+                deliveredMessageMutex.unlock();
                 return;
             }
         } // so we couldn't find it in the deliveredMessage list also... we throw an error just to be safe
         perror("handle_seqmsg ERROR: COULDN'T LOCATE MESSAGE FOR INCOMING SEQMESSAGE. EXITING...\n");
+        deliveredMessageMutex.unlock();
         exit(1);
     }
+    deliveredMessageMutex.unlock();
+
     // add it to the history if we haven't received it... then attempt to deliver
     seqMessageHistoryMutex.lock();
     seqMessageHistory.push_back(seqMessage);
@@ -336,12 +355,21 @@ void ReliableMulticast::datamsg_watchdog(const DataMessage &dataMessage, const c
 }
 
 
-int ReliableMulticast::reply_msg_with_drop_and_delay(unsigned char (&serialized_packet)[20]) {
+int ReliableMulticast::reply_msg_with_drop_and_delay(unsigned char (&serialized_packet)[MAX_STRUCT_SIZE]) {
     start_delay();
     if (random_uniform_from_0_to_1() < drop_rate){
         DPRINTF(("[Testing] Replying dropped msg!\n"));
         return -22;
     }
+    recordMessagesMutex.lock();
+    if (recordMessages){
+//        printf("[debug reply] we are told to record msgs!\n");
+        snapshot.outboundMessageBufferMutex.lock();
+        snapshot.outboundMessageBuffer.push(ByteVector(serialized_packet, serialized_packet+MAX_STRUCT_SIZE));
+        snapshot.outboundMessageBufferMutex.unlock();
+//        printf("[debug reply] done recording msg!\n");
+    }
+    recordMessagesMutex.unlock();
     return communicator.reply(reinterpret_cast<const char *>(serialized_packet), sizeof(serialized_packet));
 }
 
@@ -353,6 +381,15 @@ int ReliableMulticast::send_msg_with_drop_and_delay(const char *hostname, unsign
 //        DPRINTF(("[Testing] Message to %s was dropped!\n", hostname));
         return -22;
     }
+    recordMessagesMutex.lock();
+    if (recordMessages){
+//        printf("[debug send_msg] we are told to record msgs!\n");
+        snapshot.outboundMessageBufferMutex.lock();
+        snapshot.outboundMessageBuffer.push(ByteVector(serialized_packet, serialized_packet+MAX_STRUCT_SIZE));
+        snapshot.outboundMessageBufferMutex.unlock();
+//        printf("[debug msg_receiver] recorded msg!\n");
+    }
+    recordMessagesMutex.unlock();
     return communicator.send_to(hostname, reinterpret_cast<const char *>(serialized_packet), sizeof(serialized_packet));  // -1 to use strlen
 }
 
@@ -383,12 +420,14 @@ void ReliableMulticast::push_msg_to_deliveryqueue(QueuedMessage qm){
 
 
 void ReliableMulticast::print_delivery_queue(){
+    deliveryQueueMutex.lock();
     printf("=== deliveryQueue (min-heap of size %lu) ====\n", deliveryQueue.size());
     for (const QueuedMessage &qm: deliveryQueue){
         printf("\tseq/proposer (%d, %d), msg_id/sender (%d, %d)\n",
                qm.sequence_number, qm.proposer, qm.msg_id, qm.sender);
     }
     printf("=================================\n");
+    deliveryQueueMutex.unlock();
 }
 
 void ReliableMulticast::print_ack_history(){
@@ -417,12 +456,14 @@ double ReliableMulticast::random_uniform_from_0_to_1() {
 
 
 void ReliableMulticast::print_delivered_messages() {
+    deliveredMessageMutex.lock();
     printf("=== delivered messages so far (size %lu) ====\n", deliveredMessage.size());
     int i = 0;
     for (const QueuedMessage &qm: deliveredMessage){
         printf("\t%d: seq/proposer (%d, %d), msg_id/sender (%d, %d)\n", i++,
                qm.sequence_number, qm.proposer, qm.msg_id, qm.sender);
     }
+    deliveredMessageMutex.unlock();
     printf("=================================\n");
 }
 
@@ -435,6 +476,8 @@ void ReliableMulticast::deliver_msg_from_deliveryqueue() {
 #ifdef DEBUG
     print_delivery_queue();
 #endif
+    deliveryQueueMutex.lock();
+    deliveredMessageMutex.lock();
     while((!deliveryQueue.empty()) && deliveryQueue[0].status == DELIVERABLE){  // we found a deliverable msg with the smallest seq number
         QueuedMessage delivered_msg = deliveryQueue[0];
         deliveredMessage.push_back(delivered_msg);  // we deliver it in the queue
@@ -444,9 +487,9 @@ void ReliableMulticast::deliver_msg_from_deliveryqueue() {
         std::pop_heap(deliveryQueue.begin(), deliveryQueue.end(), cmp);
         deliveryQueue.pop_back();
     }
-#ifdef DEBUG
+    deliveredMessageMutex.unlock();
+    deliveryQueueMutex.unlock();
     print_delivered_messages();
-#endif
 //    DPRINTF(("EXIT deliver_msg_from_deliveryqueue\n"));
 }
 
@@ -611,6 +654,35 @@ int extract_int_from_string(std::string str){
     return id;
 }
 
-int ReliableMulticast::get_delay() {
+int ReliableMulticast::get_delay() const {
     return delay_in_ms;
+}
+
+
+/* For Global Snapshot */
+LocalStateSnapshot ReliableMulticast::get_local_state_snapshot() {
+//    printf("[debug getlocalstatesnapshot]: prepping to copy\n");
+    LocalStateSnapshot result;
+    deliveryQueueMutex.lock();
+    result.deliveryQueue = std::vector<QueuedMessage>(deliveryQueue);
+    deliveryQueueMutex.unlock();
+//    printf("[debug getlocalstatesnapshot]: copied deliveryQueue\n");
+//    printf("[debug  getlocalstatesnapshot]=== deliveryQueue (min-heap of size %lu) ====\n", result.deliveryQueue.size());
+//    for (const QueuedMessage &qm: result.deliveryQueue){
+//        printf("\tseq/proposer (%d, %d), msg_id/sender (%d, %d)\n",
+//               qm.sequence_number, qm.proposer, qm.msg_id, qm.sender);
+//    }
+//    printf("=================================\n\n");
+
+    deliveredMessageMutex.lock();
+    result.deliveredMessage = std::vector<QueuedMessage>(deliveredMessage);
+    deliveredMessageMutex.unlock();
+//    printf("[debug getlocalstatesnapshot]: copied deliveryQueue\n");
+
+    return result;
+}
+
+
+void ReliableMulticast::initiate_snapshot() {
+    snapshot.initiate_snapshot();
 }

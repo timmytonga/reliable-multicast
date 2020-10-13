@@ -10,13 +10,16 @@
 #include <netdb.h>
 #include <stdexcept>
 #include <cstring>
+#include <csignal>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <cerrno>
 #include <random>
+#include <sys/wait.h>
 
+#define BACKLOG 20   // how many pending connections queue will hold
 
-namespace udp_client_server
+namespace client_server
 {
     void *get_in_addr(struct sockaddr *sa);
 
@@ -45,6 +48,25 @@ namespace udp_client_server
 
     };
 
-} // namespace udp_client_server
+    class TCP_Server{
+    public:
+        explicit TCP_Server(int port, int backlog=BACKLOG);
+        ~TCP_Server();
+
+        int                 get_socket() const;
+        int                 get_port() const;
+
+        int                 accept_and_recv(char * msg, size_t max_size) const;
+        int                 connect_and_get_socket(const char * destination) const;
+        static int          sendtcp(int sock, const char * msg, size_t msg_size) ;
+
+
+    private:
+        int                 sockfd;
+        int                 f_port;
+        struct addrinfo *   f_addrinfo;
+    };
+
+} // namespace client_server
 
 #endif //PRJ1_NETWORKAGENT_H
