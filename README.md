@@ -11,7 +11,7 @@
 	- If it's an Acknowledgement (ACK) Message, it stores it in a map that keeps track of the received acknowledgement so far. If it receives enough acknowledgements (i.e. from all other processes), it picks the max sequence number and broadcast that to everybody (with a Sequence Message) signifying the final sequence choice for such message.
 	- Finally, if the incoming message is a Sequence Message, the process reorders the delivery queue based on this final sequence. Then it delivers as many messages (in front of the queue) with a final sequence number as possible. Messages that do not have a final sequence number yet (arise from said process sending out Data Message but with a smaller sequence number) can block the delivery of messages with sequence numbers already. 
 
-- It can be shown that this numbering scheme of messages (with tie-breaking using process id) provides both total-ordering and agreement of the messages' sequence. In which the process of delivering messages through a priority queue guarantees that the delivery is monotonically increasing (w.r.t. the sequence number/sender id). 
+- It can be shown that this numbering scheme of messages (with tie-breaking using proposer id) provides both total-ordering and agreement of the messages' sequence. In which the process of delivering messages through a priority queue guarantees that the delivery is monotonically increasing (w.r.t. the sequence number/sender id). 
 
 ### Handling message dropped and delayed
 - We use "watchdog" threads with timeout to handle message drops and delays. 
@@ -23,8 +23,9 @@
 
 - Now, associating with each ACK is another watchdog process waiting for a corresponding sequence message. If after a certain timeout, the watchdog thread notices that it hasn't seen a corresponding sequence message for such message, it assumes that either the Ack was dropped or the sequence message was dropped. In either case it resends the ACK until it receives a sequence message, where the process receiving a duplicate ACK simply resends the sequence message. 
 
-### Program outline
+### Program outline and implementation details
 - First each container waits for the other container to connect to the network (so nobody send until every process specified in the Hostfile is "ready" i.e. have sent and received I'm alive messages from all other processes). 
+- 
 
 
 ## Running the code
@@ -58,12 +59,50 @@ RUN g++ -pthread networkagent.cpp waittosync.cpp reliable_multicast.cpp main.cpp
 #### Turning on and off DEBUG messages 
 - Debug messages are displayed when the ``` #define DEBUG``` line in ```reliable_multicast.h``` is uncommented. We would need to recompile in order to add debug messages (this includes watchdog information, message drop information, delivery_queue, and any error/recovery messages).
 
+### Adjusting parameters
+- Parameters like watchdog-timeout and maximum number of timesouts (until declaring a process has failed) can be changed through tweaking ``` #define``` field in ```reliable_multicast.h```. 
+- Note this program spawns ```total message count * number of processes ``` threads total. If this become problematic, one can adjust the ```MAX_NUM_THREADS```  parameter in ``` reliable_multicast.h```.
+
 ### Running the program
 - The usage is specified as ```./prj1 -h Hostfile -c <count> [ -t <delay_in_ms> -d <droprate>] ``` where ```<count>``` is the number of messages for the running process to multicast to the other processes.
 - Hence, by setting count to be either 0 or a positive integer, we can **specify whether a process is a sender/receiver or purely a receiver**. This program supports any arbitrary number of senders at the same time. 
+#### Running multiple containers
+- This was written to be run interactively on the terminal. So it's best to run each container separately and observe the output separately. For each terminal (say from using Tmux or iTerm) that we spawn, after building, we can run the following to enter the interactive shell:
+```   docker run -it --name <container_name> --network <networkname> prj1```
+- Then once we are in the interactive shell, we can run each container as detailed in the next section.
 
-### Adding simulated message drops and delays
+
+### Full run command with simulated message drops and delays
+- The full run command is: 
+```./prj1 -h Hostfile -c <count> [ -t <delay_in_ms> -d <droprate>] ```.
+- Adjusting the message drops and delays can be done by setting the ```-t``` and ```-d``` parameters in the usage.
 
 
 ### Specifying which process to send
+- This can be done by setting the count of receiving processes to 0 and count of sending processes to a positive integer. 
+
+## Chandi-Lamport Global Snapshot 
+We implement the Chandi-Lamport Global Snapshot algorithm. 
+
+### Updated Dockerfile
+- We now update the Dockerfile to include the Global Snapshot
+```
+FROM ubuntu
+
+RUN apt-get update && \
+    apt-get install -y g++
+
+ADD ./*.cpp /app/
+ADD ./*.h /app/
+ADD Hostfile /app/
+ADD rprj1.sh /app/
+ADD countdelaydroprate.sh /app/
+RUN mkdir playground
+
+WORKDIR /app/
+
+
+RUN g++ -pthread networkagent.cpp waittosync.cpp CL_global_snapshot.cpp reliable_multicast.cpp main.cpp -o prj1
+
+```
 

@@ -23,7 +23,7 @@ int main(int argc, char* argv[]){
     for (int i = 0; i<num_msg_tosend; i++){
         reliableMulticast.multicast_datamsg(i*198%27);  // semi arbitrary data
 //        sleep(1);
-        if (i == snapshotafter){  // so we take snapshot once
+        if (i == snapshotafter-1){  // so we take snapshot once
             reliableMulticast.initiate_snapshot();
         }
     }

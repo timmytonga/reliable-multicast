@@ -66,8 +66,8 @@ public:
     ReliableMulticast* rm;
     // communication var
     client_server::TCP_Server server;
-    std::map<int, int> hostToSockFD;  // this is to map hostID to its sock descriptor
-    std::mutex hostToSockMutex;
+//    std::map<int, int> hostToSockFD;  // this is to map hostID to its sock descriptor
+//    std::mutex hostToSockMutex;
     std::vector<int> alreadyReceivedProc;
     // for recording and communicating with rm
     std::queue<ByteVector> inboundMessageBuffer;
@@ -84,7 +84,7 @@ public:
     // function
     void tell_rm_to_start_recording_channel() const;
     void tell_rm_to_stop_recording() const;
-    void broadcast_markers();
+    void broadcast_markers() const;
     void add_msg_to_inbound(int id, const std::string& s);
     void add_msg_to_outbound(int id, const std::string& s);
     void set_rm(ReliableMulticast *rm);

@@ -44,7 +44,7 @@ int CL_Global_Snapshot::initiate_snapshot() {
     return 0;
 }
 
-void CL_Global_Snapshot::broadcast_markers() {
+void CL_Global_Snapshot::broadcast_markers() const {
     /* now we send a marker to everybody. we send our id as a marker */
     std::stringstream ss; ss << curr_container_id; std::string our_id = ss.str();
     const char * our_ids = our_id.c_str();
@@ -273,9 +273,7 @@ void CL_Global_Snapshot::print_local_snapshot() {
 
 
 CL_Global_Snapshot::~CL_Global_Snapshot() {
-    for (auto hostsock : hostToSockFD){
-        close(hostsock.second);   // close these socket FD
-    }
+
 
 }
 
